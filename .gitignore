@@ -1,0 +1,7 @@
+/build*/
+/out/
+/.vs/
+/credentials/
+*.user
+/installer/Output/
+/vcpkg_installed/

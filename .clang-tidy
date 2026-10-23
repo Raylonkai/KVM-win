@@ -1,0 +1,4 @@
+Checks: '-*,clang-analyzer-*,-clang-analyzer-optin.performance.Padding'
+WarningsAsErrors: '*'
+# Queue indices intentionally occupy distinct cache lines. Member order also
+# expresses runtime ownership (io_context outlives pending handlers).

@@ -1,0 +1,27 @@
+name: Portable C++ and Qt preview
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install development dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libasio-dev libssl-dev libgtest-dev qt6-base-dev clang clang-tidy
+      - name: Build and test
+        run: |
+          cmake --preset linux
+          cmake --build --preset linux --parallel 2
+          ctest --preset linux
+      - name: GUI smoke test
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build/linux/sharekeys_host --smoke-test --identity "$RUNNER_TEMP/sharekeys-smoke"
+      - name: Static analysis
+        run: clang-tidy -p build/linux src/core/*.cpp src/routing/*.cpp src/protocol/*.cpp src/network/*.cpp src/security/*.cpp
+      - name: Sanitizers
+        run: |
+          cmake -S . -B build/sanitizers -G Ninja -DCMAKE_CXX_COMPILER=clang++ -DSHAREKEYS_BUILD_GUI=OFF -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer" -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address,undefined"
+          cmake --build build/sanitizers --parallel 2
+          ctest --test-dir build/sanitizers --output-on-failure
