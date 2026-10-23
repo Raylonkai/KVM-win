@@ -67,7 +67,8 @@ cmake --build --preset windows-debug --parallel 2
 ctest --preset windows-debug
 cmake --build --preset windows-release --parallel 2
 ctest --preset windows-release
-cmake --install build/windows --config Release --prefix build/stage
+$stageDir = Join-Path $PWD.Path 'build/stage'
+cmake --install build/windows --config Release --prefix "$stageDir"
 ```
 
 The Windows workflow tests both configurations, stages dependencies,
@@ -76,7 +77,8 @@ input into a CI desktop. With Inno Setup 6 installed, a local developer can buil
 the installer using:
 
 ```powershell
-& 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' "/DStageDir=$pwd/build/stage" installer/sharekeys.iss
+$stageDir = Join-Path $PWD.Path 'build/stage'
+& 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' "/DStageDir=$stageDir" installer/sharekeys.iss
 ```
 
 For Linux development, install a C++20 compiler, Ninja, CMake, standalone Asio,

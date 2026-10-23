@@ -91,7 +91,8 @@ the CMake fallback pins that same archive/hash. No user-session VMs are register
 | clang-tidy analyzer checks, intentional padding check excluded | Passed |
 | Qt 6.12 offscreen host and agent startup/shutdown with generated identities | Passed |
 | Windows/MSVC, DPAPI, hooks, SendInput and interactive acceptance | Not run |
-| GitHub Actions and Inno Setup packaging | Configured, not run |
+| GitHub Actions Windows build/tests | Build and 35/35 tests passed; install staging failed (details below) |
+| Inno Setup packaging | Not reached in the failed Windows workflow |
 
 Commands used: `cmake --build build`, `cmake --build build-release`,
 `cmake --build build-asan`, and `ctest --test-dir <build-dir> --output-on-failure -j 2`.
@@ -100,12 +101,22 @@ build uses `-fsanitize=address,undefined -fno-omit-frame-pointer` with Clang; it
 configuration excludes Qt desktop targets. TLS tests and LeakSanitizer were run
 with required sandbox permissions. No Windows test is counted as passing.
 
+### Windows CI follow-up — 2026-10-23
+
+The `40ee415` Windows Actions run compiled Debug and Release and passed all 35
+tests. Staging failed during `cmake --install` because Qt rejected the relative
+`build/stage/bin/qt.conf` path. The workflow and README now use an absolute stage
+directory; this correction still requires a new Windows Actions run. The GUI
+smoke test and Inno Setup packaging were skipped in that failed run.
+
 ## Remaining limitations
 
-- **Windows remains uncompiled and unexecuted in this environment.** This includes
+- **Windows native runtime/input and installer remain unverified in this environment.**
+  CI compiled Debug/Release and passed tests, but staging has not yet been
+  re-verified after the absolute-prefix correction. This includes
   the native host/agent entry points, low-level hooks, SendInput, DPAPI, cursor
   transitions, Windows integration executable, deployment DLL collection and
-  installer/uninstaller. GitHub Actions definitions were added, not triggered.
+  installer/uninstaller. GitHub Actions has not completed packaging.
   The product Definition of Done has not been demonstrated.
 - Pairing is explicit out-of-band fingerprint exchange. PAIR_REQUEST/PAIR_APPROVED
   are reserved, not an interactive on-wire pairing flow. Agent authorization is

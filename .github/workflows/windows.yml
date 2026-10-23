@@ -21,7 +21,10 @@ jobs:
           cmake --build --preset windows-release --parallel 2
           ctest --preset windows-release
       - name: Stage Qt and runtime dependencies
-        run: cmake --install build/windows --config Release --prefix build/stage
+        shell: pwsh
+        run: |
+          $stageDir = Join-Path $PWD.Path 'build/stage'
+          cmake --install build/windows --config Release --prefix "$stageDir"
       - name: GUI smoke test without input hooks
         shell: pwsh
         env:
@@ -36,7 +39,8 @@ jobs:
         run: |
           $version = $env:GITHUB_REF_NAME -replace '^v', ''
           if ($version -notmatch '^\d+\.\d+\.\d+$') { $version = '0.1.0' }
-          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" "/DAppVersion=$version" "/DStageDir=$pwd/build/stage" installer/sharekeys.iss
+          $stageDir = Join-Path $PWD.Path 'build/stage'
+          & "${env:ProgramFiles(x86)}/Inno Setup 6/ISCC.exe" "/DAppVersion=$version" "/DStageDir=$stageDir" installer/sharekeys.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
