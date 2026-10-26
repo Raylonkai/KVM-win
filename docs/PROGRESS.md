@@ -1,5 +1,79 @@
 # ShareKeys implementation progress
 
+## Current audit revision — 2026-10-26
+
+The historical milestone record below is preserved. Current implementation and
+readiness are in [PROJECT_STATUS.md](PROJECT_STATUS.md). This revision remains
+uncommitted; no changes have been pushed or published.
+
+- [x] Read SPEC.md and audit every application/core/network/input/security/UI/test
+  area before implementation; record architecture, full keyboard path, feature
+  classifications, severity-ranked debt and separate readiness scores.
+- [x] Preserve existing host/agent/backend and manual fingerprint pairing.
+- [x] Add HostController Qt adapter without moving transport/hooks into widgets.
+- [x] Add live host/count/target summary, actual mirror toggle, explicit unsupported
+  discovery, About/build information and bounded diagnostic history/export.
+- [x] Default both windows to exit; persist explicit close/minimize-to-tray choices.
+  Host close always requests Local; Agent continues only by explicit tray choice.
+- [x] Embed Qt PNG icon, add multi-size Windows ICO and RC VERSIONINFO templates;
+  retain Windows GUI subsystem flags and startup exception dialogs.
+- [x] Align Qt runtime deployment with root-level executables; include MSVC runtime,
+  vcpkg license files, Inno icon/shortcuts and per-user upgrade/uninstall behavior.
+- [x] Add separate Host and Agent Inno payloads, checked PowerShell Release packaging,
+  isolated stage verifier, signing hooks, disposable installer round-trip checks,
+  checksums and explicitly dispatched/publish-gated Windows release workflow.
+- [x] Fix queued activation surviving emergency epochs, add worker exception
+  recovery and prevent un-applied shortcut edits being persisted by other actions.
+- [x] Add three real-widget/TLS/fake-sink scenarios, saved tray preference test,
+  and three host safety tests (queued command, worker failure, host destruction).
+- [x] Update README, ARCHITECTURE, GUI_DESIGN, BUILD_WINDOWS, ROADMAP and acceptance
+  instructions; distinguish testable backend behavior from native Windows input.
+- [ ] Build and run this revision with MSVC/Windows; inspect PE/icon/metadata and
+  staged runtime verification, then compile/run installer and clean-VM acceptance.
+- [ ] Run the updated Windows workflow for this exact revision; installers have not
+  yet been generated in this Linux environment.
+- [ ] Validate native hooks/SendInput, tray/minimize/login and one host/five PCs.
+
+### Executed validation in this revision
+
+| Check | Result and scope |
+|---|---|
+| Baseline GCC Debug configure/build | Passed; existing source, no implementation changes yet |
+| Baseline CTest in restricted sandbox | 26 passed; 9 failed opening loopback sockets (`Operation not permitted`) |
+| Baseline authorized CTest rerun | 35/35 passed; real TLS, fake native input |
+| Expanded initial Debug build/suite | Passed, 37 CTest entries (before three host safety tests) |
+| Final GCC Debug/Release builds | Passed with Qt host/agent and GUI integration executable |
+| Final Debug CTest | 40/40 entries passed (42 GoogleTest cases: 35 backend + 4 settings + 3 GUI) |
+| Final Release CTest | 40/40 entries passed, same scope |
+| Clang ASan/UBSan/LeakSanitizer | 35/35 portable backend tests passed; Qt excluded |
+| Linux host and agent smoke | Both returned zero using offscreen platform and fresh temporary identities |
+| GUI visual inspection | Offscreen host mirror dashboard and agent setup rendered; previews under build/audit-evidence; not Windows screenshots |
+| clang-tidy | Changed backend and five GUI translation units passed using a Clang compile database |
+| Windows compile attempt | clang-cl stopped at missing `cstdint` (MSVC headers/toolchain absent); no Windows binary produced |
+| Windows GUI/DPAPI/native input | Not executed |
+| PowerShell/Inno/installer runtime | Not executed; PowerShell/Inno/Windows runtime absent |
+| Windows CI for this revision | Not dispatched: local changes are uncommitted and user prohibited commit/push without approval |
+| Whitespace review | git diff --check passed |
+
+Commands: `cmake --preset linux`, `cmake --build --preset linux --parallel 2`,
+`ctest --preset linux --parallel 2`, and corresponding build-release commands.
+JUnit reports are saved in `build/audit-evidence/{debug,release,sanitizer}-tests.xml`.
+The single `Desktop.GuiIntegration` CTest entry contains three GoogleTests.
+Portable safety tests are in `tests/integration/network_test.cpp`; GUI coverage is
+in `tests/integration/gui_test.cpp`. Neither fakes nor offscreen rendering prove
+physical Windows behavior, timing guarantees or application execution.
+
+The sanitizer build initially failed during GoogleTest discovery because the
+sandbox disallows LeakSanitizer's required ptrace access. The authorized build/test
+rerun passed without disabling sanitizers. clang-tidy initially rejected the GCC
+Qt flag `-mno-direct-extern-access`; configuring `build/tidy` with clang++ generated
+compatible flags and the six-file analysis passed. A GUI test compilation warning
+about GoogleTest macros inside unbraced if statements was fixed before final builds.
+The original Windows CI success recorded below is historical, not evidence for
+this working tree. No Windows packaging or interactive milestone is checked off.
+
+---
+
 The product definition remains `SPEC.md`. Windows functionality is unverified until
 compiled and exercised on Windows; Linux tests do not establish Windows support.
 

@@ -1,5 +1,6 @@
 #include "sharekeys/agent_window.hpp"
 #include "sharekeys/security.hpp"
+#include "sharekeys/desktop_application.hpp"
 #include <QApplication>
 #include <QCheckBox>
 #include <QClipboard>
@@ -22,7 +23,7 @@
 namespace sharekeys {
 AgentWindow::AgentWindow(QString directory, Start start, bool smokeTest)
     : directory_(std::move(directory)), start_(std::move(start)) {
-    setWindowTitle("ShareKeys Agent — remote PC"); resize(680, 540);
+    setWindowTitle("KVM-Win — Agent"); resize(680, 540);
     setStyleSheet("QWidget{background:#161c28;color:#e4eaf4;font-size:14px} QLineEdit,QComboBox,QSpinBox{background:#26344a;padding:8px} QPushButton{background:#334b70;padding:12px;border-radius:5px}");
     auto* layout = new QVBoxLayout(this);
     auto* title = new QLabel("Set up this remote PC"); title->setStyleSheet("font-size:24px;font-weight:bold"); layout->addWidget(title);
@@ -51,7 +52,7 @@ AgentWindow::AgentWindow(QString directory, Start start, bool smokeTest)
         try { setLoginStartup("ShareKeysAgent", enabled); }
         catch (const std::exception& error) { startup->blockSignals(true); startup->setChecked(!enabled); startup->blockSignals(false); QMessageBox::warning(this, "Startup", error.what()); }
     });
-    auto* startButton = new QPushButton("Save and start listening"); layout->addWidget(startButton);
+    auto* startButton = new QPushButton("Save and start listening"); startButton->setObjectName("startListening"); startButton->setEnabled(static_cast<bool>(start_)); layout->addWidget(startButton);
     connect(startButton, &QPushButton::clicked, this, [this] { startListening(); });
     auto* stop = new QPushButton("Stop input and disable automatic listening"); layout->addWidget(stop);
     connect(stop, &QPushButton::clicked, this, [this] { stopListening(true); });
@@ -61,13 +62,24 @@ AgentWindow::AgentWindow(QString directory, Start start, bool smokeTest)
         try { saveAgentSettings(directory_, settings()); status_->setText("Host unpaired. Input is stopped."); }
         catch (const std::exception& error) { QMessageBox::warning(this, "Unpair", error.what()); }
     });
+    const auto preferences = loadDesktopPreferences(directory_);
+    closeToTray_ = new QCheckBox("Closing the window keeps Agent listening in the tray"); closeToTray_->setObjectName("closeToTray"); closeToTray_->setChecked(preferences.closeToTray); layout->addWidget(closeToTray_);
+    minimizeToTray_ = new QCheckBox("Minimize to the system tray"); minimizeToTray_->setChecked(preferences.minimizeToTray); layout->addWidget(minimizeToTray_);
+    const auto persistPreferences = [this](bool) {
+        try { saveDesktopPreferences(directory_, {closeToTray_->isChecked(), minimizeToTray_->isChecked()}); }
+        catch (const std::exception& error) { QMessageBox::warning(this, "Desktop preferences", error.what()); }
+    };
+    connect(closeToTray_, &QCheckBox::toggled, this, persistPreferences);
+    connect(minimizeToTray_, &QCheckBox::toggled, this, persistPreferences);
+    layout->addWidget(new QLabel("Default: Close stops input and exits. Quit in the tray always stops input."));
+    layout->addWidget(new QLabel(buildInformation()));
     status_ = new QLabel("Not listening. Complete pairing to enable remote input."); status_->setWordWrap(true); layout->addWidget(status_);
     const auto saved = loadAgentSettings(directory_);
     pin_->setText(saved.hostPin); port_->setValue(saved.port);
     if (!saved.address.isEmpty()) address_->setCurrentText(saved.address);
     if (!saved.hostPin.isEmpty()) autoListen_->setChecked(saved.autoListen);
     if (!smokeTest && QSystemTrayIcon::isSystemTrayAvailable()) {
-        tray_ = new QSystemTrayIcon(style()->standardIcon(QStyle::SP_ComputerIcon), this);
+        tray_ = new QSystemTrayIcon(QApplication::windowIcon(), this);
         tray_->setToolTip("ShareKeys Agent"); auto* menu = new QMenu(this);
         menu->addAction("Open ShareKeys Agent", this, [this] { showNormal(); raise(); activateWindow(); });
         menu->addAction("Stop remote input", this, [this] { stopListening(true); });
@@ -111,8 +123,13 @@ void AgentWindow::stopListening(bool persist) {
         } catch (const std::exception& error) { QMessageBox::warning(this, "Stop settings", error.what()); }
     }
 }
+void AgentWindow::changeEvent(QEvent* event) {
+    QWidget::changeEvent(event);
+    if (event->type() == QEvent::WindowStateChange && isMinimized() && hasTray() && minimizeToTray_->isChecked())
+        QTimer::singleShot(0, this, [this] { if (isMinimized()) hide(); });
+}
 void AgentWindow::closeEvent(QCloseEvent* event) {
-    if (hasTray()) { hide(); event->ignore(); }
+    if (hasTray() && closeToTray_->isChecked()) { hide(); event->ignore(); }
     else { service_.reset(); event->accept(); }
 }
 }

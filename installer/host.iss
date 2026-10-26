@@ -1,0 +1,8 @@
+#define Role "host"
+#define AppTitle "KVM-Win Host"
+#define AppGuid "{{B126C46A-D3BF-4D3C-9BD4-1F68B4F52796}"
+#define InstallFolder "KVM-Win"
+#define ShortcutName "KVM-Win Host (main PC)"
+#define SetupName "KVM-Win-Setup-"
+#define StartupValue "ShareKeysHost"
+#include "common.iss"

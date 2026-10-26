@@ -1,5 +1,6 @@
 #include "sharekeys/agent_window.hpp"
 #include "sharekeys/security.hpp"
+#include "sharekeys/desktop_application.hpp"
 #ifdef _WIN32
 #include "sharekeys/win32_keyboard.hpp"
 #include "sharekeys/win32_mouse.hpp"
@@ -14,6 +15,7 @@
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv); QApplication::setApplicationName("ShareKeysAgent");
+    sharekeys::initializeDesktopApplication();
     QCommandLineParser parser; parser.addHelpOption();
     parser.addOption({"identity", "Identity and configuration directory", "directory", QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)});
     parser.addOption({"background", "Open in the notification area after setup"});

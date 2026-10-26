@@ -1,111 +1,74 @@
-# ShareKeys
+# KVM-Win / ShareKeys
 
-Windows-native C++20 keyboard/mouse KVM and keyboard mirroring for one host and
-up to five agents. It routes input; it is not remote desktop/video software.
-Windows compilation and interactive input remain unverified here; see
-[progress and test results](docs/PROGRESS.md).
+Windows-native C++20 software KVM for one host and up to five remote PCs. Keyboard
+Mirror Mode forwards physical keyboard events to selected agents while preserving
+local input. This is input routing, not remote desktop/video streaming.
 
-## Use the desktop app on Windows
+The repository already had a Qt host, Qt agent and secure backend; this revision
+preserves them and adds desktop polish, lifecycle safeguards and packaging checks.
+**Windows input and installer acceptance remain unverified.** Linux builds/tests
+and offscreen GUI integration are successful; see the [audit and feature matrix](docs/PROJECT_STATUS.md)
+and [executed test record](docs/PROGRESS.md). No Windows installer was built during
+this Linux audit and no release was published.
 
-Install the ShareKeys release once on each PC. Start **ShareKeys Host (main PC)**
-on the keyboard computer and **ShareKeys Agent (remote PC)** on each PC to
-control. Start-menu shortcuts launch the GUI, so normal use needs neither a
-terminal nor recompiling. Each PC needs first-time setup and pairing. The
-repository configures GitHub Actions to build a downloadable installer for
-`vX.Y.Z` release tags; no Windows release has yet been published from this
-checkout.
+## Install and open on Windows
 
-1. Launch Host. It creates a P-256 identity and displays its SHA-256 certificate
-   fingerprint.
-2. On each remote PC, launch Agent. Copy its displayed fingerprint, select its
-   private LAN address, enter the host fingerprint, and click **Save and start**.
-   Compare the two fingerprints directly on the PCs or through another trusted
-   channel; never trust fingerprints delivered only over the network.
-3. In Host's Devices tab, enter a unique name, the agent's LAN IP, port (24870 by
-   default), and verified agent fingerprint. Click **Pair and connect**. Allow
-   ShareKeys through Windows Firewall on the private network if prompted. A
-   stable address or DHCP reservation keeps saved devices reachable.
-4. Select a device and choose **Control selected PC** for exclusive routing, or
-   select mirror targets and use **Enable keyboard MIRROR** / `Ctrl+Alt+M`.
-   Mirroring keeps local input active. Mouse mirroring is separate and starts off.
-5. Use **EMERGENCY STOP** / `Ctrl+Alt+Esc` to return to Local. Disconnect,
-   unhealthy session, or queue overflow also returns routing to Local. Reconnect
-   does not automatically resume remote control or mirroring.
+Download `KVM-Win-Setup-X.Y.Z.exe` for the keyboard PC and `KVM-Agent-Setup-X.Y.Z.exe`
+for each remote from a successful Windows Release workflow or GitHub Release. Follow
+the nontechnical [installation guide](docs/INSTALLATION.md) and verify installer
+hashes using the accompanying `SHA256SUMS`. The installers are unsigned unless the
+release notes explicitly say a valid code-signing certificate was used.
 
-Keep the destination application focused and start with Notepad on disposable test
-desktops. Both PCs should use the same keyboard layout. Network receipt and
-SendInput acceptance do not prove an application performed the intended action.
+The host and agent installers are separate, per-user installs. The host GUI is
+launched from Start or its optional desktop shortcut. The remote agent runs in the
+logged-in user's interactive session, with login startup opt-in. Pairing is manual
+and uses certificate fingerprints exchanged through a trusted channel; automatic
+device discovery is not implemented. The installer does not change Windows Firewall
+policy.
 
-The GUIs save identities, pairings and settings per user. Host can reconnect
-saved devices on launch but starts in Local mode; Agent can listen automatically.
-Both have a tray menu and optional **Start with Windows** setting. Login startup
-is disabled until selected. Agent's **Unpair host** revokes its saved host.
-Windows identity keys are DPAPI-protected. A one-time install avoids rebuilding
-for everyday use, but certificates expire after one year and future software or
-security releases may require updates. Both PCs need mutual LAN reachability.
+## Build and package
 
-Host's **Unpair selected** disconnects a device and removes its configuration.
-Certificates last one year; create a new identity and explicitly re-pair both
-endpoints after expiry. Never share private keys or automatically trust a changed
-fingerprint.
-
-## Developer build
-
-Windows development requires Visual Studio 2022 with Desktop Development with
-C++, Windows 10/11 SDK, CMake 3.25+, Git and vcpkg. Dependencies include Asio,
-OpenSSL, Qt 6 Core/Widgets/Network and GoogleTest. The manifest pins a vcpkg
-baseline; review dependency security updates before deployment.
-
-From a Visual Studio developer PowerShell:
+Windows: Visual Studio 2022 C++/SDK, CMake >=3.25, vcpkg, Inno Setup 6 and PowerShell 7.
+With VCPKG_ROOT pointing to a bootstrapped vcpkg checkout, run from a VS developer
+PowerShell in the repository:
 
 ```powershell
-git clone https://github.com/microsoft/vcpkg.git C:/dev/vcpkg
-C:/dev/vcpkg/bootstrap-vcpkg.bat -disableMetrics
-$env:VCPKG_ROOT = 'C:/dev/vcpkg'
-cmake --preset windows
-cmake --build --preset windows-debug --parallel 2
-ctest --preset windows-debug
-cmake --build --preset windows-release --parallel 2
-ctest --preset windows-release
-$stageDir = Join-Path $PWD.Path 'build/stage'
-cmake --install build/windows --config Release --prefix "$stageDir"
+./scripts/package_windows.ps1
 ```
 
-The Windows workflow tests both configurations, stages dependencies,
-smoke-tests both GUIs and packages an Inno Setup installer. It does not inject
-input into a CI desktop. With Inno Setup 6 installed, a local developer can build
-the installer using:
+This builds and tests Release, stages Qt/OpenSSL/MSVC dependencies, verifies isolated
+GUI startup, and generates separate host and agent Inno installers with SHA-256
+checksums. [BUILD_WINDOWS.md](docs/BUILD_WINDOWS.md) and [RELEASE.md](docs/RELEASE.md)
+describe local packaging and explicitly triggered GitHub releases. End users do not
+run the build script.
 
-```powershell
-$stageDir = Join-Path $PWD.Path 'build/stage'
-& 'C:/Program Files (x86)/Inno Setup 6/ISCC.exe' "/DStageDir=$stageDir" installer/sharekeys.iss
-```
-
-For Linux development, install a C++20 compiler, Ninja, CMake, standalone Asio,
-OpenSSL development files, GoogleTest and Qt 6 Widgets/Network development files:
+Linux development requires a C++20 compiler, Ninja, CMake, OpenSSL, GoogleTest,
+Qt 6 Widgets/Network and standalone Asio headers:
 
 ```sh
 cmake --preset linux
-cmake --build --preset linux
+cmake --build --preset linux --parallel 2
 ctest --preset linux
-QT_QPA_PLATFORM=offscreen ./build/linux/sharekeys_host --smoke-test --identity /tmp/sharekeys-smoke
+QT_QPA_PLATFORM=offscreen ./build/linux/sharekeys_host --smoke-test --identity /tmp/kvm-win-host-smoke
+QT_QPA_PLATFORM=offscreen ./build/linux/sharekeys_agent --smoke-test --identity /tmp/kvm-win-agent-smoke
 ```
 
-If Asio is not installed, CMake downloads a SHA-256-pinned Asio 1.32.0 archive.
-Offline builds can set `-DASIO_INCLUDE_DIR=/path/to/asio/include`. Set
-`-DSHAREKEYS_BUILD_GUI=OFF` for portable backend/tests. Linux builds do not
-capture/inject desktop input; TLS tests need loopback sockets. See
-[architecture](docs/ARCHITECTURE.md) for ownership and protocol details.
+CMake downloads SHA-256-pinned Asio 1.32.0 if headers are unavailable. Offline builds
+can set `-DASIO_INCLUDE_DIR=/path/to/asio/include`. `-DSHAREKEYS_BUILD_GUI=OFF` builds
+portable backend/tests on Linux. TLS tests need loopback socket access. Linux is a
+configuration/testing preview and does not capture or inject native desktop input.
 
-The installer is per-user, has Start menu shortcuts for Host and Agent, and
-includes an uninstaller; desktop shortcuts are optional. Uninstall removes
-installed binaries and shortcuts while retaining per-user identity/configuration
-for deliberate recovery or removal. The installer, Windows GUI, DPAPI, hooks,
-SendInput and interactive behavior have not been validated in this environment.
+## Understand and validate the project
 
-See [Windows acceptance instructions](docs/WINDOWS_TESTING.md) before real use.
-Secure desktops, Ctrl+Alt+Delete, login screens, protected input and bypassing
-UAC/UIPI are unsupported. Equal privilege levels are required for ordinary
-injection. AltGr, Pause/Break, unusual keyboards, mixed DPI and pointer
-acceleration need Windows acceptance testing. `sharekeys_agent_cli.exe` remains
-available for developer diagnostics; normal operation uses the desktop GUIs.
+- [Project status](docs/PROJECT_STATUS.md): full audit, feature evidence, code trace,
+  technical debt and readiness scores.
+- [Architecture](docs/ARCHITECTURE.md): startup, ownership, protocol and shutdown.
+- [GUI design](docs/GUI_DESIGN.md): controls, explicit lifecycle preferences and limits.
+- [Windows acceptance](docs/WINDOWS_TESTING.md): physical one-host/five-agent matrix.
+- [Progress](docs/PROGRESS.md) and [ranked roadmap](docs/ROADMAP.md).
+
+Secure desktops, Ctrl+Alt+Delete, login screens and UAC/UIPI bypass are unsupported.
+Special keys, mixed DPI, high-rate mice and physical/injected key coexistence still
+need Windows acceptance. SendInput success and protocol RTT do not prove an
+application executed a business action. Forced termination of the agent cannot
+run its cleanup. Production trading-desk deployment is not validated.

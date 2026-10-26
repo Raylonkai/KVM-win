@@ -17,7 +17,9 @@ jobs:
       - name: GUI smoke test
         env:
           QT_QPA_PLATFORM: offscreen
-        run: ./build/linux/sharekeys_host --smoke-test --identity "$RUNNER_TEMP/sharekeys-smoke"
+        run: |
+          ./build/linux/sharekeys_host --smoke-test --identity "$RUNNER_TEMP/sharekeys-smoke"
+          ./build/linux/sharekeys_agent --smoke-test --identity "$RUNNER_TEMP/sharekeys-agent-smoke"
       - name: Static analysis
         run: clang-tidy -p build/linux src/core/*.cpp src/routing/*.cpp src/protocol/*.cpp src/network/*.cpp src/security/*.cpp
       - name: Sanitizers

@@ -18,12 +18,16 @@ root (no additional `sharekeys/` directory is required).
   device slots. Each connection has its own bounded outbound queue. GUI commands
   are posted to this thread. The GUI reads a mutex-protected status snapshot;
   hooks use atomic suppression/emergency state and never acquire this mutex.
+- `HostController` (`src/gui/host_controller.cpp`) bridges HostEngine to Qt: a
+  100 ms Qt timer emits `statusChanged` snapshots; command methods delegate to
+  HostEngine. Device slots remain in the engine, saved device records in the
+  existing HostWindow configuration layer.
 - Qt widgets and rendering stay on the main GUI thread. Input hooks are destroyed
   before the engine. Engine shutdown requests releases, closes sockets (which
   also triggers agent cleanup), stops its event loop and joins its thread.
 - The agent setup window owns an `AgentService` for each listener session. Its
   TLS accept/read loop and keyboard/mouse injection run on a dedicated Asio
-  thread; status is marshaled to the Qt thread through a callback. Stop closes
+  thread; a Qt timer reads a mutex-protected status snapshot every 200 ms. Stop closes
   the listener, disconnects the peer, requests release and joins that thread.
   Agent settings are saved atomically in the per-user application-data folder;
   optional login startup uses a per-user Windows Run key. Host settings persist
@@ -122,3 +126,64 @@ and wait 750 ms before accepting another transition.
 Identical keyboard layouts are required. SendInput success means only that Windows
 accepted an input record. Neither it nor a network reply proves that a trading
 application (or any other application) executed a business action.
+
+
+## Desktop startup to shutdown (current revision)
+
+```mermaid
+flowchart LR
+    Main[Qt main / identity / process lock] --> UI[HostWindow]
+    UI --> Controller[HostController]
+    Controller --> Engine[HostEngine / Asio thread]
+    Hooks[Win32 keyboard and mouse threads] --> Queue[Bounded MPSC input queue]
+    Queue --> Engine
+    Engine --> Router[InputRouter]
+    Router --> Peers[Up to five TLS Peer connections]
+    Peers --> Agent[AgentService / Asio thread]
+    Agent --> State[InjectedKeyboard / InjectedMouse]
+    State --> Sink[Win32 sinks / SendInput]
+```
+
+1. `apps/host/main.cpp:16` constructs QApplication, installs application resources,
+   chooses the per-user ShareKeysHost directory and takes its QLockFile. It creates
+   the identity only when absent, then constructs HostEngine and HostWindow.
+   `initializeDesktopApplication` sets the icon/version and Fusion style.
+2. `HostEngine::HostEngine` loads TLS identity and starts its private Asio thread.
+   HostWindow loads devices/groups/layout/settings and optionally requests saved
+   connections. Input begins Local. Its HostController posts commands through the
+   engine API and emits snapshot signals to the widgets; it owns no transport.
+3. On Windows, main constructs KeyboardHook and MouseHook bound to engine capture
+   callbacks. These own independent Win32 message loops. In smoke mode they are
+   skipped. Main then shows the GUI (or an explicitly requested background tray)
+   and runs QApplication's event loop. Startup exceptions show an error dialog;
+   smoke errors return a failing exit code without a modal dialog.
+4. The remote `apps/agent/gui_main.cpp:16` establishes its identity/process lock,
+   constructs physical-state hooks and Win32 sinks, then supplies AgentWindow a
+   factory for AgentService. Save/start validates the host pin and bind address;
+   AgentService accepts mutually authenticated TLS and dispatches input to sinks.
+5. Default Host close calls emergencyStop and exits. Optional close-to-tray still
+   requests Local; minimizing preserves routing. Qt shutdown destroys hooks before
+   HostEngine, so no callback accesses a destroyed engine. The engine requests
+   releases and closes sockets, stops io_context and joins. Closing immediately
+   means queued release frames are not guaranteed to flush; the agent's socket
+   close/heartbeat recovery releases independently. This path has a fake-sink TLS
+   regression test, not a native Windows success claim.
+6. Agent default close/explicit Quit destroys AgentService before its sinks/hooks.
+   The service closes the peer/listener, releases injected keys/buttons, joins,
+   and retries releases during teardown. If the user explicitly chose continued
+   operation in the tray, closing only hides the agent. No software cleanup can
+   run after that agent process is forcibly terminated.
+
+The Qt UI library is `sharekeys_desktop_ui`; core/network remain Qt independent.
+`desktop.json` stores close/minimize preferences separately from host.json and
+agent authorization, preserving legacy formats. No old identity folders are
+renamed. In-memory diagnostic history contains mode/connection transitions only.
+It is bounded and exported only at the user's request.
+
+`HostEngine::setMode/controlDevice` bind GUI activation commands to the emergency
+input epoch. An emergency invalidates already queued activations as well as
+captured input. `enterRemote` checks the epoch after cursor centering too.
+`HostEngine::fail` is the worker exception boundary: it restores local suppression,
+closes peers, stops the event loop and publishes a restart-required unhealthy
+snapshot. It does not silently restart input. Agent timeout remains an independent
+recovery mechanism when the host cannot deliver a release frame.

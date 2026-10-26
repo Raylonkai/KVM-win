@@ -11,7 +11,7 @@
 namespace sharekeys {
 struct DeviceConfig { DeviceId id; std::string address, pin; std::uint16_t port{24870}; };
 struct DeviceStatus { DeviceConfig config; bool online{}; unsigned retries{}; std::string status{"disconnected"}; std::optional<double> roundTripMs; };
-struct HostStatus { ControlMode mode{}; std::string active; std::vector<DeviceStatus> devices; std::string lastEvent; };
+struct HostStatus { ControlMode mode{}; std::string active; std::vector<DeviceStatus> devices; std::string lastEvent; bool healthy{true}; };
 class HostEngine {
 public:
     explicit HostEngine(const std::filesystem::path& identity, std::function<bool()> centerLocal = {});
@@ -48,6 +48,7 @@ private:
     void nextDevice();
     void switchEdge(const DeviceId& source, Edge edge);
     void enterRemote(const DeviceId& id);
+    void fail() noexcept;
     asio::io_context io_;
     asio::ssl::context tls_{asio::ssl::context::tls};
     asio::steady_timer pumpTimer_{io_};

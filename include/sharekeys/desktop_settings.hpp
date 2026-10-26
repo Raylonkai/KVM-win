@@ -3,6 +3,12 @@
 #include <filesystem>
 namespace sharekeys {
 std::filesystem::path nativePath(const QString& value);
+struct DesktopPreferences {
+    bool closeToTray{};
+    bool minimizeToTray{};
+};
+DesktopPreferences loadDesktopPreferences(const QString& directory);
+void saveDesktopPreferences(const QString& directory, const DesktopPreferences& preferences);
 struct AgentSettings {
     QString hostPin, address;
     int port{24870};

@@ -37,3 +37,13 @@ TEST(DesktopSettings, LegacyPairingLoadsWithoutAutomaticListening) {
     ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate)); file.write("broken"); file.close();
     EXPECT_THROW(loadAgentSettings(directory.path()), std::runtime_error);
 }
+TEST(DesktopSettings, TrayBehaviorRequiresExplicitPreferenceAndSurvivesRestart) {
+    QTemporaryDir directory; ASSERT_TRUE(directory.isValid());
+    const auto defaults = loadDesktopPreferences(directory.path());
+    EXPECT_FALSE(defaults.closeToTray); EXPECT_FALSE(defaults.minimizeToTray);
+    saveDesktopPreferences(directory.path(), {true, true});
+    EXPECT_TRUE(loadDesktopPreferences(directory.path()).closeToTray);
+    EXPECT_TRUE(loadDesktopPreferences(directory.path()).minimizeToTray);
+    saveDesktopPreferences(directory.path(), {});
+    EXPECT_FALSE(loadDesktopPreferences(directory.path()).closeToTray);
+}

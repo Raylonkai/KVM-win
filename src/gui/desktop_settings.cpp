@@ -10,6 +10,26 @@
 #include <QSettings>
 
 namespace sharekeys {
+DesktopPreferences loadDesktopPreferences(const QString& directory) {
+    QFile file(directory + "/desktop.json");
+    if (!file.exists()) return {};
+    if (!file.open(QIODevice::ReadOnly)) throw std::runtime_error("Cannot read desktop preferences.");
+    QJsonParseError error;
+    const auto document = QJsonDocument::fromJson(file.readAll(), &error);
+    const auto json = document.object();
+    if (error.error != QJsonParseError::NoError || !document.isObject()
+        || !json.value("closeToTray").isBool() || !json.value("minimizeToTray").isBool())
+        throw std::runtime_error("Invalid desktop preferences.");
+    return {json.value("closeToTray").toBool(), json.value("minimizeToTray").toBool()};
+}
+void saveDesktopPreferences(const QString& directory, const DesktopPreferences& preferences) {
+    if (!QDir().mkpath(directory)) throw std::runtime_error("Cannot create preferences directory.");
+    const auto bytes = QJsonDocument(QJsonObject{{"closeToTray", preferences.closeToTray},
+        {"minimizeToTray", preferences.minimizeToTray}}).toJson();
+    QSaveFile file(directory + "/desktop.json");
+    if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size() || !file.commit())
+        throw std::runtime_error("Cannot save desktop preferences.");
+}
 std::filesystem::path nativePath(const QString& value) {
 #ifdef _WIN32
     return std::filesystem::path(value.toStdWString());

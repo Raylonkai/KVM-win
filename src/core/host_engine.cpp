@@ -9,7 +9,27 @@ HostEngine::HostEngine(const std::filesystem::path& identity, std::function<bool
     }), centerLocal_(std::move(centerLocal)) {
     security::loadIdentity(tls_, identity);
     pump();
-    thread_ = std::thread([this] { io_.run(); });
+    thread_ = std::thread([this] {
+        try { io_.run(); }
+        catch (...) { fail(); }
+    });
+}
+void HostEngine::fail() noexcept {
+    exclusive_.store(false); inputEpoch_.fetch_add(1);
+    // A handler failure must not terminate the process with exclusive input on.
+    // Closing TCP also invokes the agent's independent release path.
+    try { router_.emergencyStop(); } catch (...) {}
+    for (auto& [id, slot] : slots_) {
+        (void)id; slot->enabled = false;
+        try { if (slot->peer) slot->peer->close("engine_error"); } catch (...) {}
+    }
+    io_.stop();
+    try {
+        std::lock_guard lock(statusMutex_);
+        status_.healthy = false; status_.mode = ControlMode::Local;
+        status_.lastEvent = "engine_error_restart_required";
+        for (auto& device : status_.devices) { device.online = false; device.status = "engine_error"; }
+    } catch (...) { /* Local input has already been restored, including on allocation failure. */ }
 }
 HostEngine::~HostEngine() {
     exclusive_.store(false);
@@ -100,7 +120,9 @@ void HostEngine::disconnect(const DeviceId& id, bool remove) {
     });
 }
 void HostEngine::setMode(ControlMode mode) {
-    asio::post(io_, [this, mode] {
+    const auto epoch = inputEpoch_.load();
+    asio::post(io_, [this, mode, epoch] {
+        if (epoch != inputEpoch_.load()) return;
         if (mode == ControlMode::Remote) { enterRemote(router_.activeDevice()); return; }
         const bool ok = router_.setMode(mode); publish(ok ? "mode_changed" : "select_connected_target_first");
     });
@@ -108,7 +130,10 @@ void HostEngine::setMode(ControlMode mode) {
 void HostEngine::setActiveDevice(DeviceId id) {
     asio::post(io_, [this, id = std::move(id)] { router_.setActiveDevice(id); publish(); });
 }
-void HostEngine::controlDevice(DeviceId id) { asio::post(io_, [this, id = std::move(id)] { enterRemote(id); }); }
+void HostEngine::controlDevice(DeviceId id) {
+    const auto epoch = inputEpoch_.load();
+    asio::post(io_, [this, id = std::move(id), epoch] { if (epoch == inputEpoch_.load()) enterRemote(id); });
+}
 void HostEngine::setTargets(std::vector<DeviceId> ids) {
     asio::post(io_, [this, ids = std::move(ids)] { router_.setMirrorTargets(ids); publish(); });
 }
@@ -122,9 +147,11 @@ void HostEngine::configureLayout(std::map<DeviceId, GridPosition> positions, boo
     asio::post(io_, [this, candidate = std::move(candidate), enabled] { router_.emergencyStop(); workspace_ = candidate; edgesEnabled_ = enabled; publish(); });
 }
 void HostEngine::enterRemote(const DeviceId& id) {
+    const auto epoch = inputEpoch_.load();
     const auto target = id; // setActiveDevice may update the referenced string.
     if (!router_.setActiveDevice(target) || !router_.setMode(ControlMode::Remote)) { router_.emergencyStop(); publish("select_connected_target_first"); return; }
     if (centerLocal_ && !centerLocal_()) { router_.emergencyStop(); publish("pointer_center_failed"); return; }
+    if (epoch != inputEpoch_.load()) { router_.emergencyStop(); publish("emergency_local_control"); return; }
     const auto it = slots_.find(target);
     if (it == slots_.end() || !it->second->peer || !it->second->peer->send(protocol::Type::MouseMove, encodeMouse({MouseKind::Move, 32768, 32768, 0, false, true}))) router_.emergencyStop();
     lastSwitch_ = std::chrono::steady_clock::now(); publish();

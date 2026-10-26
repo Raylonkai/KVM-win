@@ -18,6 +18,7 @@ public:
     bool hasTray() const;
 protected:
     void closeEvent(QCloseEvent* event) override;
+    void changeEvent(QEvent* event) override;
 private:
     void startListening();
     void stopListening(bool persist);
@@ -29,6 +30,7 @@ private:
     QLineEdit* pin_{};
     QSpinBox* port_{};
     QCheckBox* autoListen_{};
+    QCheckBox *closeToTray_{}, *minimizeToTray_{};
     QLabel* status_{};
     QSystemTrayIcon* tray_{};
 };

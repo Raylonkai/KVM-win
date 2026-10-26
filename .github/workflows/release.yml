@@ -1,0 +1,159 @@
+name: Windows Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version matching CMakeLists.txt and vcpkg.json (X.Y.Z)'
+        required: true
+        type: string
+      publish:
+        description: 'Publish a GitHub Release after all checks pass'
+        default: false
+        type: boolean
+      sign:
+        description: 'Sign using the protected release-signing environment'
+        default: false
+        type: boolean
+      prerelease:
+        description: 'Mark the published release as a prerelease'
+        default: true
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: windows-release-${{ inputs.version }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: windows-2022
+    environment: ${{ inputs.sign && 'release-signing' || 'release-build' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate release version and read dependency pin
+        id: metadata
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          $manifest = Get-Content vcpkg.json -Raw | ConvertFrom-Json
+          if ($env:RELEASE_VERSION -notmatch '^\d+\.\d+\.\d+$' -or $env:RELEASE_VERSION -ne $manifest.'version-string') { throw 'Version must match the manifest.' }
+          if ($manifest.'builtin-baseline' -notmatch '^[a-f0-9]{40}$') { throw 'A pinned vcpkg baseline is required.' }
+          "baseline=$($manifest.'builtin-baseline')" >> $env:GITHUB_OUTPUT
+      - uses: actions/checkout@v4
+        with:
+          repository: microsoft/vcpkg
+          ref: ${{ steps.metadata.outputs.baseline }}
+          path: .vcpkg
+      - name: Bootstrap pinned vcpkg
+        shell: pwsh
+        run: |
+          & ./.vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "VCPKG_ROOT=$(Join-Path $PWD.Path '.vcpkg')" >> $env:GITHUB_ENV
+      - name: Import optional signing identity
+        if: inputs.sign
+        shell: pwsh
+        env:
+          KVM_SIGN_PFX_BASE64: ${{ secrets.KVM_SIGN_PFX_BASE64 }}
+          KVM_SIGN_PFX_PASSWORD: ${{ secrets.KVM_SIGN_PFX_PASSWORD }}
+        run: ./scripts/import_signing_certificate.ps1
+      - name: Build, test, stage and package both roles
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          SIGN_PACKAGES: ${{ inputs.sign }}
+          KVM_SIGN_TIMESTAMP_URL: ${{ vars.KVM_SIGN_TIMESTAMP_URL }}
+        run: ./scripts/package_windows.ps1 -Version $env:RELEASE_VERSION -Sign:($env:SIGN_PACKAGES -eq 'true')
+      - name: Install, reinstall and uninstall both packages
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          SIGN_PACKAGES: ${{ inputs.sign }}
+        run: |
+          ./scripts/test_windows_installer.ps1 -Installer "build/distribution/KVM-Win-Setup-$env:RELEASE_VERSION.exe" -Role host -Version $env:RELEASE_VERSION -EvidenceDir build/installer-evidence -RequireSigned:($env:SIGN_PACKAGES -eq 'true')
+          ./scripts/test_windows_installer.ps1 -Installer "build/distribution/KVM-Agent-Setup-$env:RELEASE_VERSION.exe" -Role agent -Version $env:RELEASE_VERSION -EvidenceDir build/installer-evidence -RequireSigned:($env:SIGN_PACKAGES -eq 'true')
+      - name: Remove imported signing identity
+        if: always() && inputs.sign
+        shell: pwsh
+        run: |
+          if ($env:KVM_IMPORTED_CERTIFICATES) {
+            foreach ($thumb in $env:KVM_IMPORTED_CERTIFICATES.Split(',')) {
+              if ($thumb -match '^[A-Fa-f0-9]{40}$') { Remove-Item "Cert:\CurrentUser\My\$thumb" -DeleteKey -ErrorAction SilentlyContinue }
+            }
+          }
+      - name: Upload distribution
+        uses: actions/upload-artifact@v4
+        with:
+          name: KVM-Win-${{ inputs.version }}-Windows-x64
+          if-no-files-found: error
+          path: |
+            build/distribution/KVM-*-Setup-*.exe
+            build/distribution/SHA256SUMS
+            build/distribution/release-manifest.json
+            build/distribution/INSTALLATION.md
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: KVM-Win-${{ inputs.version }}-validation
+          path: |
+            build/distribution/tests-release.xml
+            build/windows/Testing/Temporary/LastTest.log
+            build/installer-evidence/
+  publish:
+    if: inputs.publish
+    needs: build
+    runs-on: windows-2022
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: KVM-Win-${{ inputs.version }}-Windows-x64
+          path: distribution
+      - name: Verify assets and publish the selected commit
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          $manifest = Get-Content distribution/release-manifest.json -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $env:RELEASE_VERSION -or $manifest.sourceCommit -ne $env:GITHUB_SHA -or $manifest.sourceDirty) { throw 'Artifact provenance mismatch.' }
+          $expected = @("KVM-Win-Setup-$env:RELEASE_VERSION.exe", "KVM-Agent-Setup-$env:RELEASE_VERSION.exe")
+          $lines = @(Get-Content distribution/SHA256SUMS)
+          if ($lines.Count -ne 2) { throw 'Expected two installer checksums.' }
+          foreach ($line in $lines) {
+            if ($line -notmatch '^([a-f0-9]{64})  (KVM-(?:Win|Agent)-Setup-[0-9.]+\.exe)$') { throw 'Malformed checksum record.' }
+            $hash = $Matches[1]; $file = $Matches[2]
+            if ($file -notin $expected -or (Get-FileHash "distribution/$file" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash) { throw 'Installer checksum mismatch.' }
+            $expected = @($expected | Where-Object { $_ -ne $file })
+          }
+          if ($expected.Count -ne 0) { throw 'Incomplete installer checksums.' }
+          $tag = "v$env:RELEASE_VERSION"
+          git show-ref --verify --quiet "refs/tags/$tag"
+          if ($LASTEXITCODE -eq 0) {
+            $tagCommit = git rev-parse "$tag^{commit}"
+            if ($tagCommit -ne $env:GITHUB_SHA) { throw 'Existing tag points at another commit.' }
+          }
+          $signing = if ($manifest.signed) { 'Authenticode signed and timestamped.' } else { 'Unsigned build; no publisher identity is asserted.' }
+          @"
+          Host: KVM-Win-Setup-$env:RELEASE_VERSION.exe
+          Remote PCs: KVM-Agent-Setup-$env:RELEASE_VERSION.exe
+
+          $signing
+          See INSTALLATION.md. SHA256SUMS verifies downloaded installer bytes.
+          Automated tests, isolated GUI smoke and hosted-runner install/reinstall/uninstall checks passed.
+          Clean-VM, cross-version upgrade and physical multi-PC input acceptance are separate release gates and are not established by this workflow.
+          Source commit: $env:GITHUB_SHA
+          "@ | Set-Content release-notes.md -Encoding utf8NoBOM
+          $arguments = @('release', 'create', $tag, '--target', $env:GITHUB_SHA, '--title', "KVM-Win $env:RELEASE_VERSION", '--notes-file', 'release-notes.md')
+          if ($env:PRERELEASE -eq 'true') { $arguments += '--prerelease' }
+          $arguments += @(Get-ChildItem distribution -File | Select-Object -ExpandProperty FullName)
+          gh @arguments
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

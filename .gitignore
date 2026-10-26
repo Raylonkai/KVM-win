@@ -5,3 +5,5 @@
 *.user
 /installer/Output/
 /vcpkg_installed/
+
+/.vcpkg/

@@ -43,7 +43,7 @@ in a test report; do not infer application behavior from protocol diagnostics.
 | Gracefully stop/restart agent | Keys released before exit; host reconnects with backoff and stays Local |
 | Wrong/revoked pin | Authentication fails; no input injection |
 | Expired certificate | Authentication fails; requires new identity and explicit pairing |
-| Host restart | Settings persist, mode starts Local, connections require Connect |
+| Host restart | Settings persist, mode starts Local; connection follows the saved auto-connect preference |
 | Elevated app/secure desktop | Unsupported injection fails safely; no security bypass |
 
 Repeat with left/right modifiers, AltGr layouts, Pause/Break, PrintScreen, media
@@ -62,3 +62,24 @@ startup, tray operations, and uninstall. Verify Run entries are removed and
 per-user identity files are retained as documented. Check dependency licenses
 before redistribution; this does not constitute a release/license audit or signed
 build.
+
+
+## Desktop revision acceptance additions
+
+- Run `scripts/verify_windows_stage.ps1` with both offscreen and windows platforms.
+  Check native title-bar/taskbar icon and Explorer File properties manually.
+- On a disposable VM run `scripts/test_windows_installer.ps1`; separately install
+  as a standard user without Visual Studio/Qt/OpenSSL on PATH. Test an upgrade
+  with existing pairings and verify identity fingerprints are unchanged.
+- Default Close exits both roles and releases a held remote Ctrl/Shift. Opt into
+  close-to-tray: Host returns Local; Agent continues only by that explicit choice.
+  Test Quit and logoff, unavailable tray, minimize/restore, and login startup.
+- Test emergency while rapidly clicking Remote/Mirror: previously queued activation
+  must not resume routing. GUI status must follow actual engine state, including
+  engine-error restart-required diagnostics and disabled activation buttons.
+- Check host name/count/targets and mirror toggle; export diagnostics and confirm
+  no captured key values/text. Discovery must remain visibly unavailable.
+
+No checkbox in this document records an executed Windows result. Store the actual
+revision, OS/tool versions, steps and observed pass/failure in a separate acceptance
+record and link it from PROGRESS.md before closing these gates.

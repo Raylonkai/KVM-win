@@ -1,0 +1,8 @@
+#define Role "agent"
+#define AppTitle "KVM-Win Agent"
+#define AppGuid "{{D169AD0E-CC81-4E2B-B06D-33151D62E750}"
+#define InstallFolder "KVM-Agent"
+#define ShortcutName "KVM-Win Agent (remote PC)"
+#define SetupName "KVM-Agent-Setup-"
+#define StartupValue "ShareKeysAgent"
+#include "common.iss"

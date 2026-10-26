@@ -244,3 +244,85 @@ TEST(Tls, FiveAgentsReceiveMirrorEventsAndEmergencyCleanup) {
     ASSERT_TRUE(until([&] { const auto state = host.status(); return state.devices[0].online && state.devices[0].retries > 0; }));
     EXPECT_EQ(host.status().mode, ControlMode::Local);
 }
+
+namespace {
+struct CountingKeys final : KeyboardSink {
+    std::atomic_uint downs{}, ups{};
+    bool send(const KeyboardEvent& event) override { if (event.down) ++downs; else ++ups; return true; }
+    bool physicallyHeld(KeyId) const override { return false; }
+};
+struct AcceptingMouse final : MouseSink {
+    bool sendMouse(const MouseEvent&) override { return true; }
+    bool physicalButton(std::uint8_t) const override { return false; }
+};
+bool waitFor(const std::function<bool()>& predicate) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (!predicate() && std::chrono::steady_clock::now() < deadline) std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    return predicate();
+}
+std::uint16_t reservePort() {
+    asio::io_context io;
+    asio::ip::tcp::acceptor listener(io, {asio::ip::address_v4::loopback(), 0});
+    return listener.local_endpoint().port();
+}
+}
+TEST(HostSafety, EmergencyInvalidatesQueuedGuiModeCommands) {
+    Identities ids; CountingKeys keys; AcceptingMouse mouse;
+    const auto port = reservePort();
+    AgentService agent(ids.directory / "agent", security::fingerprint(ids.directory / "host/identity.crt"), "127.0.0.1", port, keys, mouse);
+    std::promise<void> entered, proceed;
+    auto inCallback = entered.get_future(); auto resume = proceed.get_future();
+    std::atomic_uint entries{};
+    HostEngine host(ids.directory / "host", [&] {
+        if (++entries == 1) {
+            entered.set_value();
+            // Bounded test barrier, not production network blocking.
+            resume.wait_for(std::chrono::seconds(2));
+        }
+        return true;
+    });
+    host.connect({"desk", "127.0.0.1", security::fingerprint(ids.directory / "agent/identity.crt"), port});
+    ASSERT_TRUE(waitFor([&] { const auto s = host.status(); return !s.devices.empty() && s.devices[0].online; }));
+    host.setTargets({"desk"}); host.controlDevice("desk");
+    ASSERT_EQ(inCallback.wait_for(std::chrono::seconds(2)), std::future_status::ready);
+    host.setMode(ControlMode::Mirror); // Queued behind enterRemote.
+    host.controlDevice("desk");
+    host.emergencyStop(); proceed.set_value();
+    ASSERT_TRUE(waitFor([&] { return host.status().lastEvent == "emergency_local_control"; }));
+    std::this_thread::sleep_for(std::chrono::milliseconds(30));
+    EXPECT_EQ(entries.load(), 1U); // Even a transient second activation is unsafe.
+    EXPECT_EQ(host.status().mode, ControlMode::Local);
+    EXPECT_FALSE(host.captureKey({{30, 65, false}, true}));
+}
+TEST(HostSafety, WorkerExceptionRestoresLocalAndClosesAgentSession) {
+    Identities ids; CountingKeys keys; AcceptingMouse mouse;
+    const auto port = reservePort();
+    AgentService agent(ids.directory / "agent", security::fingerprint(ids.directory / "host/identity.crt"), "127.0.0.1", port, keys, mouse);
+    HostEngine host(ids.directory / "host", []() -> bool { throw std::runtime_error("simulated cursor failure"); });
+    host.connect({"desk", "127.0.0.1", security::fingerprint(ids.directory / "agent/identity.crt"), port});
+    ASSERT_TRUE(waitFor([&] { const auto s = host.status(); return !s.devices.empty() && s.devices[0].online; }));
+    host.setTargets({"desk"}); host.setMode(ControlMode::Mirror);
+    ASSERT_TRUE(waitFor([&] { return host.status().mode == ControlMode::Mirror; }));
+    host.captureKey({{29, 0xA2, false}, true});
+    ASSERT_TRUE(waitFor([&] { return keys.downs == 1; }));
+    host.controlDevice("desk");
+    ASSERT_TRUE(waitFor([&] { return !host.status().healthy; }));
+    EXPECT_EQ(host.status().mode, ControlMode::Local);
+    EXPECT_EQ(host.status().lastEvent, "engine_error_restart_required");
+    ASSERT_TRUE(waitFor([&] { return keys.ups == 1 && !agent.status().connected; }));
+    EXPECT_FALSE(host.captureKey({{30, 65, false}, true}));
+}
+TEST(HostSafety, HostDestructionReleasesAgentHeldModifier) {
+    Identities ids; CountingKeys keys; AcceptingMouse mouse;
+    const auto port = reservePort();
+    AgentService agent(ids.directory / "agent", security::fingerprint(ids.directory / "host/identity.crt"), "127.0.0.1", port, keys, mouse);
+    auto host = std::make_unique<HostEngine>(ids.directory / "host");
+    host->connect({"desk", "127.0.0.1", security::fingerprint(ids.directory / "agent/identity.crt"), port});
+    ASSERT_TRUE(waitFor([&] { const auto s = host->status(); return !s.devices.empty() && s.devices[0].online; }));
+    host->setTargets({"desk"}); host->setMode(ControlMode::Mirror);
+    ASSERT_TRUE(waitFor([&] { return host->status().mode == ControlMode::Mirror; }));
+    host->captureKey({{29, 0xA2, false}, true});
+    ASSERT_TRUE(waitFor([&] { return keys.downs == 1; }));
+    host.reset();
+    ASSERT_TRUE(waitFor([&] { return keys.ups == 1 && !agent.status().connected; }));
+}
